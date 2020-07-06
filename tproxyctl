@@ -1,0 +1,112 @@
+#!/bin/bash
+
+program_name=$(basename "$0")
+
+sub_help() {
+  echo "Usage: $program_name <subcommand> [options]"
+  echo ""
+  echo "Subcommands:"
+  echo "  start"
+  echo "  stop"
+  echo ""
+  echo "For help with each subcommand run:"
+  echo "$program_name <subcommand> -h|--help"
+  echo ""
+}
+
+check_root() {
+  if [[ $EUID -ne 0 ]]; then
+     echo "This script must be run as root."
+     exit 1
+  fi
+}
+
+sub_stop() {
+  check_root
+  ip rule del fwmark 1 table 100 2>/dev/null
+  ip route del local 0.0.0.0/0 dev lo table 100 2>/dev/null
+  iptables -t mangle -F V2RAY 2>/dev/null
+  iptables -t mangle -F V2RAY_MARK 2>/dev/null
+  iptables -t mangle -D PREROUTING -j V2RAY 2>/dev/null
+  iptables -t mangle -D OUTPUT -j V2RAY_MARK 2>/dev/null
+  iptables -t mangle -X V2RAY 2>/dev/null
+  iptables -t mangle -X V2RAY_MARK 2>/dev/null
+}
+
+fetch_ip_address() {
+  interface4=$(ip -4 route ls | grep default | grep -Po '(?<=dev )(\S+)')
+  ip4=$(ip -o -4 addr list "$interface4" | awk '{print $4}' | cut -d/ -f1)
+}
+
+sub_start() {
+  check_root
+  sub_stop
+  fetch_ip_address
+
+  # Setting up routes
+  ip rule add fwmark 1 table 100
+  ip route add local 0.0.0.0/0 dev lo table 100
+
+  # Create chains
+  iptables -t mangle -N V2RAY
+  iptables -t mangle -N V2RAY_MARK
+
+  # Proxy local network connections
+  iptables -t mangle -A V2RAY -d "$ip4" -j RETURN
+
+  iptables -t mangle -A V2RAY -d 0.0.0.0/8 -j RETURN
+  iptables -t mangle -A V2RAY -d 127.0.0.0/8 -j RETURN
+  iptables -t mangle -A V2RAY -d 169.254.0.0/16 -j RETURN
+  iptables -t mangle -A V2RAY -d 224.0.0.0/4 -j RETURN
+  iptables -t mangle -A V2RAY -d 240.0.0.0/4 -j RETURN
+  iptables -t mangle -A V2RAY -d 255.255.255.255/32 -j RETURN
+
+  iptables -t mangle -A V2RAY -d 10.0.0.0/8 -p tcp -j RETURN
+  iptables -t mangle -A V2RAY -d 10.0.0.0/8 -p udp ! --dport 53 -j RETURN
+  iptables -t mangle -A V2RAY -d 172.16.0.0/12 -p tcp -j RETURN
+  iptables -t mangle -A V2RAY -d 172.16.0.0/12 -p udp ! --dport 53 -j RETURN
+  iptables -t mangle -A V2RAY -d 192.168.0.0/16 -p tcp -j RETURN
+  iptables -t mangle -A V2RAY -d 192.168.0.0/16 -p udp ! --dport 53 -j RETURN
+
+  iptables -t mangle -A V2RAY -p udp -j TPROXY --on-port 2080 --tproxy-mark 1
+  iptables -t mangle -A V2RAY -p tcp -j TPROXY --on-port 2080 --tproxy-mark 1
+
+  # Proxy self connections
+  iptables -t mangle -A V2RAY_MARK -d 0.0.0.0/8 -j RETURN
+  iptables -t mangle -A V2RAY_MARK -d 127.0.0.0/8 -j RETURN
+  iptables -t mangle -A V2RAY_MARK -d 169.254.0.0/16 -j RETURN
+  iptables -t mangle -A V2RAY_MARK -d 224.0.0.0/4 -j RETURN
+  iptables -t mangle -A V2RAY_MARK -d 240.0.0.0/4 -j RETURN
+  iptables -t mangle -A V2RAY_MARK -d 255.255.255.255/32 -j RETURN
+
+  iptables -t mangle -A V2RAY_MARK -d 10.0.0.0/8 -p tcp -j RETURN
+  iptables -t mangle -A V2RAY_MARK -d 10.0.0.0/8 -p udp ! --dport 53 -j RETURN
+  iptables -t mangle -A V2RAY_MARK -d 172.16.0.0/12 -p tcp -j RETURN
+  iptables -t mangle -A V2RAY_MARK -d 172.16.0.0/12 -p udp ! --dport 53 -j RETURN
+  iptables -t mangle -A V2RAY_MARK -d 192.168.0.0/16 -p tcp -j RETURN
+  iptables -t mangle -A V2RAY_MARK -d 192.168.0.0/16 -p udp ! --dport 53 -j RETURN
+
+  iptables -t mangle -A V2RAY_MARK -j RETURN -m mark --mark 0xff
+  iptables -t mangle -A V2RAY_MARK -p udp -j MARK --set-mark 1
+  iptables -t mangle -A V2RAY_MARK -p tcp -j MARK --set-mark 1
+
+  # Apply rules
+  iptables -t mangle -A PREROUTING -j V2RAY
+  iptables -t mangle -A OUTPUT -j V2RAY_MARK
+}
+
+subcommand=$1
+case $subcommand in
+    "" | "-h" | "--help")
+        sub_help
+        ;;
+    *)
+        shift
+        "sub_${subcommand}" "$@"
+        if [ $? = 127 ]; then
+            echo "Error: '$subcommand' is not a known subcommand." >&2
+            echo "  Run '$program_name --help' for a list of known subcommands." >&2
+            exit 1
+        fi
+        ;;
+esac
