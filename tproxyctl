@@ -68,8 +68,8 @@ sub_start() {
   iptables -t mangle -A V2RAY -d 192.168.0.0/16 -p tcp -j RETURN
   iptables -t mangle -A V2RAY -d 192.168.0.0/16 -p udp ! --dport 53 -j RETURN
 
-  iptables -t mangle -A V2RAY -p udp -j TPROXY --on-port 2080 --tproxy-mark 1
-  iptables -t mangle -A V2RAY -p tcp -j TPROXY --on-port 2080 --tproxy-mark 1
+  iptables -t mangle -A V2RAY -p udp -j TPROXY --on-port "${1-2080}" --tproxy-mark 1
+  iptables -t mangle -A V2RAY -p tcp -j TPROXY --on-port "${1-2080}" --tproxy-mark 1
 
   # Proxy self connections
   iptables -t mangle -A V2RAY_MARK -d 0.0.0.0/8 -j RETURN
