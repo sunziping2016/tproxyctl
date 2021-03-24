@@ -38,6 +38,16 @@ fetch_ip_address() {
   ip4=$(ip -o -4 addr list "$interface4" | awk '{print $4}' | cut -d/ -f1)
 }
 
+sub_status() {
+  check_root
+  port=$(iptables -t mangle -nL | sed -ne 's/.*TPROXY\s\+redirect\s\+0\.0\.0\.0:\([0-9]\+\).*/\1/p' | head -n 1)
+  if [ -z "$port" ]; then
+    echo -e "\033[1;31minactive\033[0m"
+  else
+    echo -e "\033[1;32mactive\033[0m@$port"
+  fi
+}
+
 sub_start() {
   check_root
   sub_stop
