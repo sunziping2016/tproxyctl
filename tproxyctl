@@ -7,6 +7,8 @@ sub_help() {
   echo ""
   echo "Subcommands:"
   echo "  start"
+  echo "  status"
+  echo "  list"
   echo "  stop"
   echo ""
   echo "For help with each subcommand run:"
@@ -19,6 +21,18 @@ check_root() {
      echo "This script must be run as root."
      exit 1
   fi
+}
+
+sub_list() {
+  if [ -f /etc/tproxyctl ]; then
+    while IFS= read -r line; do
+      name=$(echo "$line" | tr -s " " | cut -d " " -f 1)
+      port=$(echo "$line" | tr -s " " | cut -d " " -f 2)
+      echo -e "\033[1;32m$name\033[0m => \033[1;33m$port\033[0m"
+    done < /etc/tproxyctl
+  else
+    echo -e "\033[1;31mfailed to find the config file\033[0m"
+  fi;
 }
 
 sub_stop() {
@@ -44,12 +58,42 @@ sub_status() {
   if [ -z "$port" ]; then
     echo -e "\033[1;31minactive\033[0m"
   else
-    echo -e "\033[1;32mactive\033[0m@$port"
+    if [ -f /etc/tproxyctl ]; then
+      while IFS= read -r line; do
+        if [ "$(echo "$line" | tr -s " " | cut -d " " -f 2)" = "$port" ]; then
+          name=$(echo "$line" | tr -s " " | cut -d " " -f 1)
+        fi
+      done < /etc/tproxyctl
+    fi
+    if [ -z "$name" ]; then
+      echo -e "\033[1;32mactive\033[0m@\033[1;33m$port\033[0m"
+    else
+      echo -e "\033[1;32mactive\033[0m@\033[1;33m$port\033[0m (\033[1;32m$name\033[0m)"
+    fi
   fi
 }
 
 sub_start() {
   check_root
+
+  port="${1-2080}"
+  re='^[0-9]+$'
+  if ! [[ "$port" =~ $re ]]; then
+    if [ -f /etc/tproxyctl ]; then
+      while IFS= read -r line; do
+        if [ "$(echo "$line" | tr -s " " | cut -d " " -f 1)" = "$port" ]; then
+          real_port=$(echo "$line" | tr -s " " | cut -d " " -f 2)
+        fi
+      done < /etc/tproxyctl
+    fi
+    if [ -z "$real_port" ]; then
+      echo -e "\033[1;31munknown configuration: $port\033[0m"
+      exit 1
+    else
+      port="$real_port"
+    fi
+  fi
+
   sub_stop
   fetch_ip_address
 
@@ -78,8 +122,8 @@ sub_start() {
   iptables -t mangle -A V2RAY -d 192.168.0.0/16 -p tcp -j RETURN
   iptables -t mangle -A V2RAY -d 192.168.0.0/16 -p udp ! --dport 53 -j RETURN
 
-  iptables -t mangle -A V2RAY -p udp -j TPROXY --on-port "${1-2080}" --tproxy-mark 1
-  iptables -t mangle -A V2RAY -p tcp -j TPROXY --on-port "${1-2080}" --tproxy-mark 1
+  iptables -t mangle -A V2RAY -p udp -j TPROXY --on-port "$port" --tproxy-mark 1
+  iptables -t mangle -A V2RAY -p tcp -j TPROXY --on-port "$port" --tproxy-mark 1
 
   # Proxy self connections
   iptables -t mangle -A V2RAY_MARK -d 0.0.0.0/8 -j RETURN
