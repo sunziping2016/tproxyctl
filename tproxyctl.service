@@ -1,0 +1,11 @@
+[Unit]
+Description=Enable trasparent proxy for v2ray
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/tproxyctl start
+ExecStop=/usr/local/bin/tproxyctl stop
+
+[Install]
+WantedBy=multi-user.target
